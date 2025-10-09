@@ -43,7 +43,6 @@ def parse_price(price_str):
     clean_price = re.sub(r'[^\d]', '', str(price_str))
     return int(clean_price) if clean_price else float('inf')
 
-@traceable  # NEW: LangSmith trace for tool init
 def initialize_tools(google_key, weather_key, serper_key, langchain_key):
     """Initialize LangChain tools and agent. UPDATED: Re-added serper_key for SerpApi. Traced for monitoring."""
     try:
