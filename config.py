@@ -1,9 +1,14 @@
 """
-This file handles the initial configuration for the Streamlit app, including page settings, custom CSS styling,
-and initialization of session state variables. It ensures consistent UI appearance and state management across the app.
-UPDATED: Re-added 'serper_api_key' to session state for SerpApi integration.
+This file handles the initial configuration for the Streamlit app, including page settings, custom CSS styling.
+It ensures consistent UI appearance. Session state init moved to app.py for reliability.
+UPDATED: Removed session init to avoid import-order issues on reload.
 """
 import streamlit as st
+from dotenv import load_dotenv
+import os
+
+# Load .env at startup
+load_dotenv()
 
 # Page config
 st.set_page_config(
@@ -69,22 +74,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state
-if 'step' not in st.session_state:
-    st.session_state.step = 0
-if 'weather_data' not in st.session_state:
-    st.session_state.weather_data = None
-if 'agent_decision' not in st.session_state:
-    st.session_state.agent_decision = None
-if 'itinerary_data' not in st.session_state:
-    st.session_state.itinerary_data = None
-if 'api_keys_configured' not in st.session_state:
-    st.session_state.api_keys_configured = False
-if 'google_api_key' not in st.session_state:
-    st.session_state.google_api_key = ''
-if 'weather_api_key' not in st.session_state:
-    st.session_state.weather_api_key = ''
-if 'serper_api_key' not in st.session_state:
-    st.session_state.serper_api_key = ''
-if 'alternative_suggestions' not in st.session_state:
-    st.session_state.alternative_suggestions = []
+# Validate keys once at startup (early error if missing)
+google_key = os.getenv('GOOGLE_API_KEY')
+weather_key = os.getenv('OPENWEATHERMAP_API_KEY')
+serper_key = os.getenv('SERPAPI_KEY')  # Note: Use SERPAPI_KEY as per user's code
+
+if not all([google_key, weather_key, serper_key]):
+    st.error("❌ Missing API keys in .env! Add GOOGLE_API_KEY, OPENWEATHERMAP_API_KEY, SERPAPI_KEY.")
+    st.stop()
+else:
+    # Set configured flag after validation (now in app.py for session)
+    pass
