@@ -139,7 +139,7 @@ def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_ci
                                 except:
                                     st.image("https://via.placeholder.com/300x200?text=No+Image", caption=row['Hotel'])  # Placeholder
                     if len(hotels_df) > 9:
-                        st.info("Showing top 9 hotels...")
+                        pass
             else:
                 st.warning("No hotel data available. Check sites like Booking.com.")
     
@@ -183,7 +183,7 @@ def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_ci
                                 except:
                                     st.warning("Thumbnail unavailable.")
                     if len(attractions_df) > 9:
-                        st.info("Showing top 9 attractions...")
+                        pass
             else:
                 st.warning("No attractions data available. Try Tripadvisor.")
 
@@ -209,14 +209,9 @@ def render_sidebar():
     """Render the sidebar with app info. UPDATED: Removed API status/update button."""
     st.header("ℹ️ About")
     st.write("""
-    This **Agentic** AI Trip Planner uses:
-    - **AI Agent** for intelligent weather decisions
-    - **Google Gemini** for planning
-    - **OpenWeatherMap** for weather forecasts
-    - **SerpApi** for real-time search (flights, hotels, attractions)
+    This **Agentic** AI Trip Planner :
     
-    **Agentic Features:**
-    - 🤖 AI automatically evaluates weather
+    - 🤖 Automatically evaluates weather
     - ⚠️ Rejects unsuitable conditions
     - 🌍 Suggests better alternatives
     - ✅ Makes smart travel decisions
