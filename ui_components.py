@@ -10,6 +10,14 @@ from tools import get_flights_table, get_hotels_table, get_attractions_table
 from agents import generate_trip_plan
 import pandas as pd
 
+# Detect small screen width (works for mobile/tablet)
+if "screen_mode" not in st.session_state:
+    try:
+        width = st.runtime.scriptrunner.script_run_context.get_script_run_ctx().session.client.width
+        st.session_state['screen_mode'] = 'small' if width < 800 else 'large'
+    except:
+        st.session_state['screen_mode'] = 'auto'
+
 def render_stars(rating: float, max_stars: int = 5) -> str:
     """Helper to render rating as Unicode stars (e.g., ★★★★☆ for 4.0)."""
     if pd.isna(rating) or rating <= 0:
@@ -120,7 +128,14 @@ def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_ci
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
                 else:
                     # All good: Cards only
-                    cols = st.columns(3)
+                    # Responsive layout: show 1 card per row on small screens
+                    if st.session_state.get('screen_mode', 'auto') == 'small':
+                        num_cols = 1
+                    else:
+                        num_cols = 3  # default for larger screens
+
+                    cols = st.columns(num_cols)
+
                     for idx, row in hotels_df.iterrows():
                         col_idx = idx % 3
                         with cols[col_idx]:
@@ -160,11 +175,18 @@ def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_ci
                             failed_thumbnails += 1
                 
                 if failed_thumbnails > 0:
-                    st.info(f"Some thumbnails ({failed_thumbnails}/{len(attractions_df)}) unavailable—showing as table. More attractions you can explore on Tripadvisor!")
+                    st.info(f"More attractions you can explore on Tripadvisor!")
                     st.dataframe(attractions_df[['Place', 'Description', 'Rating']], use_container_width=True, hide_index=True)
                 else:
                     # All good: Cards only
-                    cols = st.columns(3)
+                    # Responsive layout: show 1 card per row on small screens
+                    if st.session_state.get('screen_mode', 'auto') == 'small':
+                        num_cols = 1
+                    else:
+                        num_cols = 3  # default for larger screens
+
+                    cols = st.columns(num_cols)
+
                     for idx, row in attractions_df.iterrows():
                         col_idx = idx % 3
                         with cols[col_idx]:
@@ -186,7 +208,6 @@ def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_ci
                         pass
             else:
                 st.warning("No attractions data available. Try Tripadvisor.")
-
     with tab4:
         st.subheader(f"Day-by-Day {duration}-Day Itinerary")
         with st.spinner("Generating personalized plan..."):
@@ -194,7 +215,34 @@ def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_ci
             hotels_df = get_hotels_table(destination_city)
             attractions_df = get_attractions_table(destination_city)
             trip_plan = generate_trip_plan(flights_df, hotels_df, attractions_df, duration, destination_city, google_key)
-            st.markdown(trip_plan)
+
+            # Normalize excessive spacing (remove >2 consecutive newlines)
+            import re
+            trip_plan_clean = re.sub(r'\n{3,}', '\n\n', trip_plan.strip())
+
+            st.session_state.itinerary_data = trip_plan_clean
+
+            # Uniform, clean font styling
+            st.markdown(
+                f"""
+                <div style="
+                    font-family: 'Inter', sans-serif;
+                    font-size: 16px;
+                    line-height: 1.6;
+                    color: #1c1c1c;
+                    background-color: #f9f9f9;
+                    padding: 20px;
+                    border-radius: 12px;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+                    white-space: pre-wrap;">
+                    {trip_plan_clean}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            
+
 
 def render_footer():
     """Render the app footer."""
@@ -218,4 +266,4 @@ def render_sidebar():
     """)
     
     st.markdown("---")
-    st.caption("Made with ❤️ using Streamlit & LangChain")
+    st.caption("Send your feedback on nitishbhardwaj471@gmail.com")
