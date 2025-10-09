@@ -6,3 +6,4 @@ pandas
 serpapi
 streamlit
 pyowm
+requests
