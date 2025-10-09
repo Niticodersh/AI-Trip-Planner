@@ -1,12 +1,22 @@
 """
 This file contains reusable UI components for the app, such as progress indicators, decision cards, itinerary tabs,
 and navigation buttons. It helps keep the main app file clean by abstracting common rendering logic.
-UPDATED: Simplified tabs to Flights, Hotels, Attractions, Itinerary. Use st.dataframe for tables from SerpApi DataFrames. Itinerary shows generated plan text.
+UPDATED: Added render_stars helper to display ratings as ★ stars (e.g., ★★★★☆ for 4/5). Used in hotel/attraction cards.
+UPDATED: For hotels/attractions: If any image missing, fallback to table + "Explore more..." message. If all images present, use cards only (no table).
 """
 import streamlit as st
 from datetime import datetime
 from tools import get_flights_table, get_hotels_table, get_attractions_table
 from agents import generate_trip_plan
+import pandas as pd
+
+def render_stars(rating: float, max_stars: int = 5) -> str:
+    """Helper to render rating as Unicode stars (e.g., ★★★★☆ for 4.0)."""
+    if pd.isna(rating) or rating <= 0:
+        return "☆" * max_stars
+    full_stars = int(rating)
+    empty_stars = max_stars - full_stars
+    return "★" * full_stars + "☆" * empty_stars
 
 def render_header():
     """Render the main app header."""
@@ -28,34 +38,6 @@ def render_progress(step):
         with col3:
             st.markdown(f"**{'🟢' if step >= 3 else '⚪'} Step 3: Trip Details**")
         st.markdown("---")
-
-def render_api_setup_info():
-    """Render the API setup info card and expander. UPDATED: Re-added Serper instructions."""
-    st.markdown("""
-    <div class='api-setup-card'>
-        <h3>⚙️ Before you start, please provide your API keys</h3>
-        <p>This app requires three API keys to function. Don't worry, they're stored only in your session!</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    with st.expander("ℹ️ How to get API keys", expanded=False):
-        st.markdown("""
-        ### 1. Google Gemini API Key (Required for AI)
-        - Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
-        - Click "Get API Key" or "Create API Key"
-        - Copy your key
-        
-        ### 2. OpenWeatherMap API Key (Required for Weather)
-        - Go to [OpenWeatherMap](https://openweathermap.org/api)
-        - Sign up for a free account
-        - Go to API Keys section
-        - Copy your key
-        
-        ### 3. Serper API Key (Required for Search)
-        - Go to [Serper.dev](https://serper.dev/)
-        - Sign up (free tier available)
-        - Get your API key from dashboard
-        """)
 
 def render_decision_card(decision):
     """Render the AI decision card (green for suitable, orange for not)."""
@@ -86,8 +68,11 @@ def render_alternative_card(alt, idx):
     </div>
     """, unsafe_allow_html=True)
 
+
 def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_city, destination_city, duration, travel_date, decision):
-    """Render tabs for Step 3 using SerpApi DataFrames + Gemini plan. UPDATED: Flights/Hotels/Attractions as separate tabs with dataframes; Itinerary shows generated text."""
+    """Render tabs for Step 3 using SerpApi DataFrames + Gemini plan. UPDATED: Used render_stars in cards. For hotels/attractions: Pre-check images with requests (status+size); if any fail, fallback to full table + message; else cards only with per-image fallback/placeholder."""
+    import requests  # For image validation/fallback
+    
     # Show AI decision summary
     decision_color = "#4facfe" if decision['decision'] == "SUITABLE" else "#fa709a"
     st.markdown(f"""
@@ -114,7 +99,47 @@ def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_ci
         with st.spinner("Fetching hotels..."):
             hotels_df = get_hotels_table(destination_city)
             if not hotels_df.empty:
-                st.dataframe(hotels_df, use_container_width=True, hide_index=True)
+                # NEW: Strict pre-check with requests for each image
+                failed_images = 0
+                total_images = 0
+                for _, row in hotels_df.iterrows():
+                    if row.get('Image') and pd.notna(row['Image']) and row['Image'] != '':
+                        total_images += 1
+                        try:
+                            response = requests.head(row['Image'], timeout=3, allow_redirects=True)
+                            if response.status_code != 200 or 'content-length' not in response.headers or int(response.headers['content-length']) == 0:
+                                failed_images += 1
+                        except:
+                            failed_images += 1
+                
+                has_issues = failed_images > 0 or total_images == 0
+                if has_issues:
+                    st.info(f"Image issues detected ({failed_images}/{total_images})—showing as table. More hotels you can explore on Booking.com!")
+                    display_df = hotels_df[['Hotel', 'Price', 'Rating']].copy()
+                    display_df['Rating'] = display_df['Rating'].apply(lambda r: f"{render_stars(r)} ({r})" if pd.notna(r) else "N/A")
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                else:
+                    # All good: Cards only
+                    cols = st.columns(3)
+                    for idx, row in hotels_df.iterrows():
+                        col_idx = idx % 3
+                        with cols[col_idx]:
+                            st.markdown(f"### {row['Hotel']}")
+                            st.write(f"**Price:** {row['Price']}")
+                            st.write(f"**Rating:** {render_stars(row['Rating'])} ({row['Rating']})")
+                            # Runtime fallback with placeholder
+                            image_url = row['Image']
+                            try:
+                                st.image(image_url, caption=row['Hotel'])
+                            except Exception:
+                                try:
+                                    response = requests.get(image_url, timeout=5)
+                                    response.raise_for_status()
+                                    st.image(response.content, caption=row['Hotel'])
+                                except:
+                                    st.image("https://via.placeholder.com/300x200?text=No+Image", caption=row['Hotel'])  # Placeholder
+                    if len(hotels_df) > 9:
+                        st.info("Showing top 9 hotels...")
             else:
                 st.warning("No hotel data available. Check sites like Booking.com.")
     
@@ -123,10 +148,45 @@ def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_ci
         with st.spinner("Fetching attractions..."):
             attractions_df = get_attractions_table(destination_city)
             if not attractions_df.empty:
-                st.dataframe(attractions_df, use_container_width=True, hide_index=True)
+                # NEW: Pre-check thumbnails
+                failed_thumbnails = 0
+                for _, row in attractions_df.iterrows():
+                    if row.get('Thumbnail') and pd.notna(row['Thumbnail']):
+                        try:
+                            response = requests.get(row['Thumbnail'], timeout=3)
+                            if response.status_code != 200 or len(response.content) == 0:
+                                failed_thumbnails += 1
+                        except:
+                            failed_thumbnails += 1
+                
+                if failed_thumbnails > 0:
+                    st.info(f"Some thumbnails ({failed_thumbnails}/{len(attractions_df)}) unavailable—showing as table. More attractions you can explore on Tripadvisor!")
+                    st.dataframe(attractions_df[['Place', 'Description', 'Rating']], use_container_width=True, hide_index=True)
+                else:
+                    # All good: Cards only
+                    cols = st.columns(3)
+                    for idx, row in attractions_df.iterrows():
+                        col_idx = idx % 3
+                        with cols[col_idx]:
+                            st.markdown(f"### {row['Place']}")
+                            st.write(row['Description'])
+                            st.write(f"**Rating:** {render_stars(row['Rating'])} ({row['Rating']})")
+                            # Per-image fallback
+                            image_url = row['Thumbnail']
+                            try:
+                                st.image(image_url, caption=row['Place'])
+                            except:
+                                try:
+                                    response = requests.get(image_url, timeout=5)
+                                    response.raise_for_status()
+                                    st.image(response.content, caption=row['Place'])
+                                except:
+                                    st.warning("Thumbnail unavailable.")
+                    if len(attractions_df) > 9:
+                        st.info("Showing top 9 attractions...")
             else:
                 st.warning("No attractions data available. Try Tripadvisor.")
-    
+
     with tab4:
         st.subheader(f"Day-by-Day {duration}-Day Itinerary")
         with st.spinner("Generating personalized plan..."):
@@ -146,7 +206,7 @@ def render_footer():
     """, unsafe_allow_html=True)
 
 def render_sidebar():
-    """Render the sidebar with app info and API status. UPDATED: Mention SerpApi."""
+    """Render the sidebar with app info. UPDATED: Removed API status/update button."""
     st.header("ℹ️ About")
     st.write("""
     This **Agentic** AI Trip Planner uses:
@@ -161,17 +221,6 @@ def render_sidebar():
     - 🌍 Suggests better alternatives
     - ✅ Makes smart travel decisions
     """)
-    
-    st.markdown("---")
-    
-    
-    if st.session_state.api_keys_configured:
-        st.success("✅ API Keys Configured")
-        if st.button("🔑 Update Keys", key="sidebar_update"):
-            st.session_state.step = 0
-            st.rerun()
-    else:
-        st.warning("⚠️ API Keys Not Set")
     
     st.markdown("---")
     st.caption("Made with ❤️ using Streamlit & LangChain")
