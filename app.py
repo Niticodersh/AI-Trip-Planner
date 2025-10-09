@@ -2,19 +2,44 @@
 This is the main entry point for the AI Trip Planner Streamlit app. It orchestrates the multi-step workflow,
 handles user inputs, calls tools/agents, and renders UI based on session state. Import other modules for modularity.
 Run with: streamlit run app.py
-UPDATED: Re-added Serper key input in Step 0. Pass serper_key and google_key to render_itinerary_tabs.
+UPDATED: Session state init at top for reload safety. Set api_keys_configured=True after env validation.
 """
 import streamlit as st
 from datetime import datetime, timedelta
 import json
 import time
 import os
+from dotenv import load_dotenv
 
-# Import from other modules
-from config import *  # Page config, CSS, session init (already runs on import)
+# Load .env (moved to config, but ensure here too)
+load_dotenv()
+
+# Import from other modules (after load_dotenv)
+from config import *  # Page config, CSS (runs validation)
+
+# Initialize session state AT TOP (safe defaults for reload)
+if 'step' not in st.session_state:
+    st.session_state.step = 1  # Start at Step 1
+if 'weather_data' not in st.session_state:
+    st.session_state.weather_data = None
+if 'agent_decision' not in st.session_state:
+    st.session_state.agent_decision = None
+if 'itinerary_data' not in st.session_state:
+    st.session_state.itinerary_data = None
+if 'alternative_suggestions' not in st.session_state:
+    st.session_state.alternative_suggestions = []
+if 'api_keys_configured' not in st.session_state:
+    st.session_state.api_keys_configured = True  # Set True after config validation
+
+# Keys from env (loaded in config)
+google_key = os.getenv('GOOGLE_API_KEY')
+weather_key = os.getenv('OPENWEATHERMAP_API_KEY')
+serper_key = os.getenv('SERPAPI_KEY')
+langchain_key = os.getenv('LANGCHAIN_API_KEY')
+
 from tools import initialize_tools
 from agents import agent_weather_decision, agent_suggest_alternatives
-from ui_components import (render_header, render_progress, render_api_setup_info, render_decision_card,
+from ui_components import (render_header, render_progress, render_decision_card,
                            render_alternative_card, render_itinerary_tabs, render_footer, render_sidebar)
 
 # Header (runs after config)
@@ -23,78 +48,8 @@ render_header()
 # Progress indicator
 render_progress(st.session_state.step)
 
-# Step 0: API Key Setup
-if st.session_state.step == 0:
-    st.header("🔑 API Keys Configuration")
-    
-    render_api_setup_info()
-    
-    st.markdown("### Enter Your API Keys:")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        google_key = st.text_input(
-            "🤖 Google Gemini API Key",
-            type="password",
-            value=st.session_state.google_api_key,
-            placeholder="AIza...",
-            help="Get from Google AI Studio"
-        )
-        
-        weather_key = st.text_input(
-            "🌤️ OpenWeatherMap API Key",
-            type="password",
-            value=st.session_state.weather_api_key,
-            placeholder="abcd1234...",
-            help="Get from OpenWeatherMap"
-        )
-    
-    with col2:
-        serper_key = st.text_input(
-            "🔍 Serper API Key",
-            type="password",
-            value=st.session_state.serper_api_key,
-            placeholder="xyz789...",
-            help="Get from Serper.dev"
-        )
-        
-        st.markdown("### ")
-        st.info("💡 **Tip:** All keys are required for full functionality")
-    
-    st.markdown("---")
-    
-    col_a, col_b, col_c = st.columns([1, 1, 1])
-    
-    with col_b:
-        if st.button("✅ Save Keys & Continue", use_container_width=True):
-            if not google_key or not weather_key or not serper_key:
-                st.error("❌ Please provide all three API keys!")
-            else:
-                with st.spinner("🔄 Validating API keys..."):
-                    try:
-                        st.session_state.google_api_key = google_key
-                        st.session_state.weather_api_key = weather_key
-                        st.session_state.serper_api_key = serper_key
-                        
-                        agent, tools, llm = initialize_tools(google_key, weather_key, serper_key)
-                        
-                        if agent and tools and llm:
-                            st.session_state.api_keys_configured = True
-                            st.session_state.step = 1
-                            st.success("✅ API keys validated successfully!")
-                            st.balloons()
-                            st.rerun()
-                        else:
-                            st.error("❌ Failed to initialize tools. Please check your API keys.")
-                    except Exception as e:
-                        st.error(f"❌ Error validating keys: {str(e)}")
-    
-    st.markdown("---")
-    st.caption("🔒 Your API keys are stored only in your session and are not saved permanently.")
-
-# Step 1: Input destination details
-elif st.session_state.step == 1:
+# Step 1: Input destination details (now default start)
+if st.session_state.step == 1:
     st.header("📍 Where would you like to go?")
     
     col1, col2 = st.columns(2)
@@ -125,11 +80,6 @@ elif st.session_state.step == 1:
                 st.session_state.duration = duration
                 st.session_state.step = 2
                 st.rerun()
-    
-    with col_y:
-        if st.button("🔑 Change API Keys"):
-            st.session_state.step = 0
-            st.rerun()
 
 # Step 2: AI Weather Analysis
 elif st.session_state.step == 2:
@@ -137,11 +87,7 @@ elif st.session_state.step == 2:
     
     with st.spinner("🔍 AI Agent is analyzing weather conditions..."):
         try:
-            agent, tools, llm = initialize_tools(
-                st.session_state.google_api_key,
-                st.session_state.weather_api_key,
-                st.session_state.serper_api_key
-            )
+            agent, tools, llm = initialize_tools(google_key, weather_key, serper_key, langchain_key)
             
             if agent and tools and llm:
                 # Get weather
@@ -226,9 +172,8 @@ elif st.session_state.step == 2:
                             st.session_state.step = 3
                             st.rerun()
             else:
-                st.error("Failed to initialize tools. Please check your API keys.")
-                if st.button("🔑 Update API Keys"):
-                    st.session_state.step = 0
+                st.error("Failed to initialize tools. Check .env keys.")
+                if st.button("🔄 Restart App"):
                     st.rerun()
                     
         except Exception as e:
@@ -238,10 +183,6 @@ elif st.session_state.step == 2:
                 if st.button("⬅️ Go Back"):
                     st.session_state.step = 1
                     st.rerun()
-            with col_b:
-                if st.button("🔑 Update API Keys"):
-                    st.session_state.step = 0
-                    st.rerun()
 
 # Step 3: Generate full itinerary
 elif st.session_state.step == 3:
@@ -250,17 +191,13 @@ elif st.session_state.step == 3:
     
     with st.spinner("🔍 Fetching flights, hotels, attractions, and generating plan..."):
         try:
-            agent, tools, llm = initialize_tools(
-                st.session_state.google_api_key,
-                st.session_state.weather_api_key,
-                st.session_state.serper_api_key
-            )
+            agent, tools, llm = initialize_tools(google_key, weather_key, serper_key, langchain_key)
             
             if agent and tools:
                 render_itinerary_tabs(
                     agent, tools, llm,
-                    st.session_state.google_api_key,  # Pass for Gemini
-                    st.session_state.serper_api_key,  # Pass for SerpApi
+                    google_key,
+                    serper_key,
                     st.session_state.starting_city,
                     st.session_state.destination_city,
                     st.session_state.duration,
@@ -269,7 +206,7 @@ elif st.session_state.step == 3:
                 )
                 
                 st.markdown("---")
-                col1, col2, col3 = st.columns(3)
+                col1, col2 = st.columns(2)
                 with col1:
                     if st.button("🔄 Plan Another Trip"):
                         st.session_state.step = 1
@@ -277,27 +214,16 @@ elif st.session_state.step == 3:
                         st.session_state.agent_decision = None
                         st.session_state.itinerary_data = None
                         st.rerun()
-                
+                        
                 with col2:
-                    if st.button("🔑 Change API Keys"):
-                        st.session_state.step = 0
-                        st.rerun()
-                
-                with col3:
                     if st.button("📥 Download Itinerary"):
                         st.success("Feature coming soon! You can copy the information above for now.")
                         
         except Exception as e:
             st.error(f"Error generating trip plan: {str(e)}")
-            col_a, col_b = st.columns(2)
-            with col_a:
-                if st.button("⬅️ Go Back"):
-                    st.session_state.step = 1
-                    st.rerun()
-            with col_b:
-                if st.button("🔑 Update API Keys"):
-                    st.session_state.step = 0
-                    st.rerun()
+            if st.button("⬅️ Go Back"):
+                st.session_state.step = 1
+                st.rerun()
 
 # Sidebar and Footer
 render_sidebar()
