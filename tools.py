@@ -4,16 +4,25 @@ and creates reusable tools for weather, and now SerpApi for flights/hotels/attra
 Weather still uses OpenWeatherMap. Agent for decisions.
 UPDATED: Integrated SerpApi functions (get_flights_table, get_hotels_table, get_attractions_table) from user's code.
 Call these directly in Step 3; no full tool list needed for itinerary now.
+UPDATED: Added "Image" to hotels DF and "Thumbnail" to attractions DF for card display.
+UPDATED: Integrated LangSmith tracing with @traceable on key functions (auto-traces LLM/agent; manual for SerpApi).
 """
 import os
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.utilities.openweathermap import OpenWeatherMapAPIWrapper
 from langchain.agents import initialize_agent, Tool, AgentType
+from langsmith import traceable  # NEW: For explicit LangSmith tracing
 import streamlit as st
 from serpapi import GoogleSearch
 import pandas as pd
 from datetime import datetime
 import re
+
+
+# LangSmith (for monitoring)
+LANGCHAIN_TRACING_V2="true"
+LANGCHAIN_PROJECT="ai-trip-planner"
+
 
 def parse_duration(duration_str):
     """Parse duration string like '2h 30m' to minutes."""
@@ -34,14 +43,15 @@ def parse_price(price_str):
     clean_price = re.sub(r'[^\d]', '', str(price_str))
     return int(clean_price) if clean_price else float('inf')
 
-def initialize_tools(google_key, weather_key, serper_key):
-    """Initialize LangChain tools and agent. UPDATED: Re-added serper_key for SerpApi."""
+@traceable  # NEW: LangSmith trace for tool init
+def initialize_tools(google_key, weather_key, serper_key, langchain_key):
+    """Initialize LangChain tools and agent. UPDATED: Re-added serper_key for SerpApi. Traced for monitoring."""
     try:
         # Set environment variables
         os.environ['GOOGLE_API_KEY'] = google_key
         os.environ['OPENWEATHERMAP_API_KEY'] = weather_key
         os.environ['SERPAPI_KEY'] = serper_key  # For SerpApi
-        
+        os.environ["LANGCHAIN_API_KEY"] = langchain_key
         weather_tool = OpenWeatherMapAPIWrapper()
         
         llm = ChatGoogleGenerativeAI(
@@ -73,8 +83,9 @@ def initialize_tools(google_key, weather_key, serper_key):
         return None, None, None
 
 # User's SerpApi functions (integrated with params from session state)
+@traceable  # NEW: Trace SerpApi calls for monitoring
 def get_flights_table(origin: str, destination: str, date: str, location: str = "Austin, Texas, United States"):
-    """Get flights table using SerpApi Google Flights."""
+    """Get flights table using SerpApi Google Flights. Traced for LangSmith."""
     query = f"Flights from {origin} to {destination} on {date}"
     
     params = {
@@ -121,9 +132,9 @@ def get_flights_table(origin: str, destination: str, date: str, location: str = 
     df = df.drop(['Duration_min', 'Price_num'], axis=1)
     return df
 
-
+@traceable  # NEW: Trace SerpApi calls for monitoring
 def get_hotels_table(location):
-    """Get hotels table using SerpApi Google."""
+    """Get hotels table using SerpApi Google. UPDATED: Added 'Image' column. Traced for LangSmith."""
     params = {
         "api_key": os.environ['SERPAPI_KEY'],
         "engine": "google",
@@ -137,17 +148,18 @@ def get_hotels_table(location):
             hotels_list.append({
                 "Hotel": hotel.get("title"),
                 "Price": hotel.get("price"),
-                "Rating": hotel.get("rating")
+                "Rating": hotel.get("rating"),
+                "Image": hotel.get("image")  # Added: Image URL for cards
             })
     df = pd.DataFrame(hotels_list)
     if not df.empty:
         df['Rating'] = pd.to_numeric(df['Rating'], errors='coerce').fillna(0)
         df = df.sort_values(by=['Rating', 'Price'], ascending=[False, True])
-        # df = df.sort_values(by='Rating', ascending=False)
     return df
 
+@traceable  # NEW: Trace SerpApi calls for monitoring
 def get_attractions_table(location):
-    """Get attractions table using SerpApi Google."""
+    """Get attractions table using SerpApi Google. UPDATED: Added 'Thumbnail' column."""
     params = {
         "api_key": os.environ['SERPAPI_KEY'],
         "engine": "google",
@@ -160,7 +172,8 @@ def get_attractions_table(location):
         attractions_list.append({
             "Place": sight.get("title"),
             "Description": sight.get("description"),
-            "Rating": sight.get("rating")
+            "Rating": sight.get("rating"),
+            "Thumbnail": sight.get("thumbnail")  # Added: Thumbnail URL for cards
         })
     df = pd.DataFrame(attractions_list)
     if not df.empty:
