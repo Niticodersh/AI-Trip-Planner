@@ -215,9 +215,7 @@ elif st.session_state.step == 3:
                         st.session_state.itinerary_data = None
                         st.rerun()
                         
-                with col2:
-                    if st.button("📥 Download Itinerary"):
-                        st.success("Feature coming soon! You can copy the information above for now.")
+ 
                         
         except Exception as e:
             st.error(f"Error generating trip plan: {str(e)}")
