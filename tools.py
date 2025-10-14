@@ -1,34 +1,25 @@
 """
-This file defines the initialization of LangChain tools and the AI agent. It sets up environment variables for APIs
-and creates reusable tools for weather, and now SerpApi for flights/hotels/attractions (replacing DDG for Step 3).
-Weather still uses OpenWeatherMap. Agent for decisions.
-UPDATED: Integrated SerpApi functions (get_flights_table, get_hotels_table, get_attractions_table) from user's code.
-Call these directly in Step 3; no full tool list needed for itinerary now.
-UPDATED: Added "Image" to hotels DF and "Thumbnail" to attractions DF for card display.
-UPDATED: Integrated LangSmith tracing with @traceable on key functions (auto-traces LLM/agent; manual for SerpApi).
+LangGraph-enhanced tools initialization with SerpApi and OpenWeatherMap.
+Includes LangSmith tracing for monitoring.
 """
 import os
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.utilities.openweathermap import OpenWeatherMapAPIWrapper
-from langchain.agents import initialize_agent, Tool, AgentType
-from langsmith import traceable  # NEW: For explicit LangSmith tracing
+from langsmith import traceable
 import streamlit as st
 from serpapi import GoogleSearch
 import pandas as pd
-from datetime import datetime
 import re
+import requests
 
-
-# LangSmith (for monitoring)
-LANGCHAIN_TRACING_V2="true"
-LANGCHAIN_PROJECT="ai-trip-planner"
-
+# LangSmith configuration
+LANGCHAIN_TRACING_V2 = "true"
+LANGCHAIN_PROJECT = "ai-trip-planner"
 
 def parse_duration(duration_str):
     """Parse duration string like '2h 30m' to minutes."""
     if pd.isna(duration_str) or duration_str == "N/A":
         return float('inf')
-    # Extract numbers: hours and minutes
     hours_match = re.search(r'(\d+)h', duration_str)
     mins_match = re.search(r'(\d+)m', duration_str)
     hours = int(hours_match.group(1)) if hours_match else 0
@@ -39,56 +30,38 @@ def parse_price(price_str):
     """Parse price string like '$100' to integer."""
     if pd.isna(price_str) or price_str == "N/A":
         return float('inf')
-    # Remove $ and commas
     clean_price = re.sub(r'[^\d]', '', str(price_str))
     return int(clean_price) if clean_price else float('inf')
 
 def initialize_tools(google_key, weather_key, serper_key, langchain_key):
-    """Initialize LangChain tools and agent. UPDATED: Re-added serper_key for SerpApi. Traced for monitoring."""
+    """Initialize tools and LLM for LangGraph agents"""
     try:
         # Set environment variables
         os.environ['GOOGLE_API_KEY'] = google_key
         os.environ['OPENWEATHERMAP_API_KEY'] = weather_key
-        os.environ['SERPAPI_KEY'] = serper_key  # For SerpApi
+        os.environ['SERPAPI_KEY'] = serper_key
         os.environ["LANGCHAIN_API_KEY"] = langchain_key
+        
         weather_tool = OpenWeatherMapAPIWrapper()
         
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
+            model="gemini-2.0-flash-exp",
             temperature=0.3,
             google_api_key=google_key
         )
         
-        # Tools list for agent (weather only needed for decisions)
-        tools = [
-            Tool(
-                name="Weather",
-                func=weather_tool.run,
-                description="Get weather forecast for a city. Input: city,country"
-            )
-        ]
-        
-        agent = initialize_agent(
-            tools,
-            llm,
-            agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-            verbose=True,
-            handle_parsing_errors=True
-        )
-        
-        return agent, tools, llm
+        return weather_tool, llm
     except Exception as e:
         st.error(f"Error initializing tools: {str(e)}")
-        return None, None, None
+        return None, None
 
-# User's SerpApi functions (integrated with params from session state)
-@traceable  # NEW: Trace SerpApi calls for monitoring
+@traceable
 def get_flights_table(origin: str, destination: str, date: str, location: str = "Austin, Texas, United States"):
-    """Get flights table using SerpApi Google Flights. Traced for LangSmith."""
+    """Get flights table using SerpApi Google Flights."""
     query = f"Flights from {origin} to {destination} on {date}"
     
     params = {
-        "api_key": os.environ['SERPAPI_KEY'],  # Use environment variable
+        "api_key": os.environ['SERPAPI_KEY'],
         "engine": "google",
         "q": query,
         "location": location,
@@ -131,9 +104,9 @@ def get_flights_table(origin: str, destination: str, date: str, location: str = 
     df = df.drop(['Duration_min', 'Price_num'], axis=1)
     return df
 
-@traceable  # NEW: Trace SerpApi calls for monitoring
+@traceable
 def get_hotels_table(location):
-    """Get hotels table using SerpApi Google. UPDATED: Added 'Image' column. Traced for LangSmith."""
+    """Get hotels table using SerpApi Google."""
     params = {
         "api_key": os.environ['SERPAPI_KEY'],
         "engine": "google",
@@ -148,7 +121,7 @@ def get_hotels_table(location):
                 "Hotel": hotel.get("title"),
                 "Price": hotel.get("price"),
                 "Rating": hotel.get("rating"),
-                "Image": hotel.get("image")  # Added: Image URL for cards
+                "Image": hotel.get("image")
             })
     df = pd.DataFrame(hotels_list)
     if not df.empty:
@@ -156,9 +129,9 @@ def get_hotels_table(location):
         df = df.sort_values(by=['Rating', 'Price'], ascending=[False, True])
     return df
 
-@traceable  # NEW: Trace SerpApi calls for monitoring
+@traceable
 def get_attractions_table(location):
-    """Get attractions table using SerpApi Google. UPDATED: Added 'Thumbnail' column."""
+    """Get attractions table using SerpApi Google."""
     params = {
         "api_key": os.environ['SERPAPI_KEY'],
         "engine": "google",
@@ -172,7 +145,7 @@ def get_attractions_table(location):
             "Place": sight.get("title"),
             "Description": sight.get("description"),
             "Rating": sight.get("rating"),
-            "Thumbnail": sight.get("thumbnail")  # Added: Thumbnail URL for cards
+            "Thumbnail": sight.get("thumbnail")
         })
     df = pd.DataFrame(attractions_list)
     if not df.empty:
