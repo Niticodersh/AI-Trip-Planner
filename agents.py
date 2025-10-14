@@ -222,7 +222,7 @@ def generate_trip_plan(flights_df, hotels_df, attractions_df, num_days, city, go
 
     **Before the itinerary, after you mention the best flight and hotel, present an Estimated Budget section like this:**
 
-    - Best roundtrip flight ticket: $[flight_price]  
+    - Best roundtrip flight ticket: $[flight_price] x 2  
     - Hotel ({num_days} nights): $[hotel_price_per_night] × {num_days}  
     - Other local expenses (meals, transit, attractions): Estimate an appropriate value for {city}  
     - **Total estimated budget for {num_days} days: $[total_amount] USD**  
