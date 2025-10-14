@@ -1,9 +1,13 @@
 langchain
 langchain-google-genai
 langchain-community
+langgraph
+langsmith
+langchainhub
 google-search-results
 pandas
 serpapi
 streamlit
 pyowm
 requests
+python-dotenv
