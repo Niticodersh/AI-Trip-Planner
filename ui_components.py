@@ -1,16 +1,17 @@
+# ui_components.py
 """
 This file contains reusable UI components for the app, such as progress indicators, decision cards, itinerary tabs,
-and navigation buttons. It helps keep the main app file clean by abstracting common rendering logic.
-UPDATED: Added render_stars helper to display ratings as ★ stars (e.g., ★★★★☆ for 4/5). Used in hotel/attraction cards.
-UPDATED: For hotels/attractions: If any image missing, fallback to table + "Explore more..." message. If all images present, use cards only (no table).
+and navigation buttons. Updated to support pre-fetched data from LangGraph state.
 """
 import streamlit as st
 from datetime import datetime
 from tools import get_flights_table, get_hotels_table, get_attractions_table
 from agents import generate_trip_plan
 import pandas as pd
+import re
+import requests
 
-# Detect small screen width (works for mobile/tablet)
+# Detect small screen width
 if "screen_mode" not in st.session_state:
     try:
         width = st.runtime.scriptrunner.script_run_context.get_script_run_ctx().session.client.width
@@ -48,7 +49,7 @@ def render_progress(step):
         st.markdown("---")
 
 def render_decision_card(decision):
-    """Render the AI decision card (green for suitable, orange for not)."""
+    """Render the AI decision card."""
     if decision['decision'] == "SUITABLE":
         st.markdown(f"""
         <div class='agent-decision good-weather'>
@@ -67,7 +68,7 @@ def render_decision_card(decision):
         """, unsafe_allow_html=True)
 
 def render_alternative_card(alt, idx):
-    """Render a single alternative destination card with select button."""
+    """Render a single alternative destination card."""
     st.markdown(f"""
     <div class='itinerary-card'>
         <h4>🌟 Alternative {idx}: {alt['city']}</h4>
@@ -76,16 +77,12 @@ def render_alternative_card(alt, idx):
     </div>
     """, unsafe_allow_html=True)
 
-
-def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_city, destination_city, duration, travel_date, decision):
-    """Render tabs for Step 3 using SerpApi DataFrames + Gemini plan. UPDATED: Used render_stars in cards. For hotels/attractions: Pre-check images with requests (status+size); if any fail, fallback to full table + message; else cards only with per-image fallback/placeholder."""
-    import requests  # For image validation/fallback
-    
-    # Show AI decision summary
+def render_itinerary_tabs(llm, google_key, starting_city, destination_city, duration, travel_date, decision):
+    """Render itinerary tabs with flights, hotels, attractions, and AI-generated plan."""
     decision_color = "#4facfe" if decision['decision'] == "SUITABLE" else "#fa709a"
     st.markdown(f"""
     <div style='background: {decision_color}; padding: 1rem; border-radius: 8px; color: white; margin-bottom: 1rem;'>
-        <strong>AI Weather Assessment:</strong> {decision['decision']} - {decision['reasoning']}
+        <strong>LangGraph Weather Assessment:</strong> {decision['decision']} - {decision['reasoning']}
     </div>
     """, unsafe_allow_html=True)
     
@@ -107,7 +104,6 @@ def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_ci
         with st.spinner("Fetching hotels..."):
             hotels_df = get_hotels_table(destination_city)
             if not hotels_df.empty:
-                # NEW: Strict pre-check with requests for each image
                 failed_images = 0
                 total_images = 0
                 for _, row in hotels_df.iterrows():
@@ -122,39 +118,23 @@ def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_ci
                 
                 has_issues = failed_images > 0 or total_images == 0
                 if has_issues:
-                    st.info(f"Image issues detected ({failed_images}/{total_images})—showing as table. More hotels you can explore on Booking.com!")
+                    st.info(f"Image issues detected—showing as table. Explore more on Booking.com!")
                     display_df = hotels_df[['Hotel', 'Price', 'Rating']].copy()
                     display_df['Rating'] = display_df['Rating'].apply(lambda r: f"{render_stars(r)} ({r})" if pd.notna(r) else "N/A")
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
                 else:
-                    # All good: Cards only
-                    # Responsive layout: show 1 card per row on small screens
-                    if st.session_state.get('screen_mode', 'auto') == 'small':
-                        num_cols = 1
-                    else:
-                        num_cols = 3  # default for larger screens
-
+                    num_cols = 1 if st.session_state.get('screen_mode', 'auto') == 'small' else 3
                     cols = st.columns(num_cols)
-
                     for idx, row in hotels_df.iterrows():
-                        col_idx = idx % 3
+                        col_idx = idx % num_cols
                         with cols[col_idx]:
                             st.markdown(f"### {row['Hotel']}")
                             st.write(f"**Price:** {row['Price']}")
                             st.write(f"**Rating:** {render_stars(row['Rating'])} ({row['Rating']})")
-                            # Runtime fallback with placeholder
-                            image_url = row['Image']
                             try:
-                                st.image(image_url, caption=row['Hotel'])
-                            except Exception:
-                                try:
-                                    response = requests.get(image_url, timeout=5)
-                                    response.raise_for_status()
-                                    st.image(response.content, caption=row['Hotel'])
-                                except:
-                                    st.image("https://via.placeholder.com/300x200?text=No+Image", caption=row['Hotel'])  # Placeholder
-                    if len(hotels_df) > 9:
-                        pass
+                                st.image(row['Image'], caption=row['Hotel'])
+                            except:
+                                st.image("https://via.placeholder.com/300x200?text=No+Image", caption=row['Hotel'])
             else:
                 st.warning("No hotel data available. Check sites like Booking.com.")
     
@@ -163,7 +143,6 @@ def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_ci
         with st.spinner("Fetching attractions..."):
             attractions_df = get_attractions_table(destination_city)
             if not attractions_df.empty:
-                # NEW: Pre-check thumbnails
                 failed_thumbnails = 0
                 for _, row in attractions_df.iterrows():
                     if row.get('Thumbnail') and pd.notna(row['Thumbnail']):
@@ -175,54 +154,36 @@ def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_ci
                             failed_thumbnails += 1
                 
                 if failed_thumbnails > 0:
-                    st.info(f"More attractions you can explore on Tripadvisor!")
+                    st.info("More attractions on Tripadvisor!")
                     st.dataframe(attractions_df[['Place', 'Description', 'Rating']], use_container_width=True, hide_index=True)
                 else:
-                    # All good: Cards only
-                    # Responsive layout: show 1 card per row on small screens
-                    if st.session_state.get('screen_mode', 'auto') == 'small':
-                        num_cols = 1
-                    else:
-                        num_cols = 3  # default for larger screens
-
+                    num_cols = 1 if st.session_state.get('screen_mode', 'auto') == 'small' else 3
                     cols = st.columns(num_cols)
-
                     for idx, row in attractions_df.iterrows():
-                        col_idx = idx % 3
+                        col_idx = idx % num_cols
                         with cols[col_idx]:
                             st.markdown(f"### {row['Place']}")
                             st.write(row['Description'])
                             st.write(f"**Rating:** {render_stars(row['Rating'])} ({row['Rating']})")
-                            # Per-image fallback
-                            image_url = row['Thumbnail']
                             try:
-                                st.image(image_url, caption=row['Place'])
+                                st.image(row['Thumbnail'], caption=row['Place'])
                             except:
-                                try:
-                                    response = requests.get(image_url, timeout=5)
-                                    response.raise_for_status()
-                                    st.image(response.content, caption=row['Place'])
-                                except:
-                                    st.warning("Thumbnail unavailable.")
-                    if len(attractions_df) > 9:
-                        pass
+                                st.warning("Thumbnail unavailable.")
             else:
                 st.warning("No attractions data available. Try Tripadvisor.")
+    
     with tab4:
         st.subheader(f"Day-by-Day {duration}-Day Itinerary")
-        with st.spinner("Generating personalized plan..."):
+        with st.spinner("LangGraph generating personalized plan..."):
             flights_df = get_flights_table(starting_city, destination_city, date_str)
             hotels_df = get_hotels_table(destination_city)
             attractions_df = get_attractions_table(destination_city)
             trip_plan = generate_trip_plan(flights_df, hotels_df, attractions_df, duration, destination_city, google_key)
 
-            # Normalize excessive spacing (remove >2 consecutive newlines)
             import re
             trip_plan_clean = re.sub(r'\n{3,}', '\n\n', trip_plan.strip())
-
             st.session_state.itinerary_data = trip_plan_clean
 
-            # Uniform, clean font styling
             st.markdown(
                 f"""
                 <div style="
@@ -241,8 +202,6 @@ def render_itinerary_tabs(agent, tools, llm, google_key, serper_key, starting_ci
                 unsafe_allow_html=True
             )
 
-            
-
 
 def render_footer():
     """Render the app footer."""
@@ -254,16 +213,16 @@ def render_footer():
     """, unsafe_allow_html=True)
 
 def render_sidebar():
-    """Render the sidebar with app info. UPDATED: Removed API status/update button."""
+    """Render the sidebar with app info."""
     st.header("ℹ️ About")
     st.write("""
     This **Agentic** AI Trip Planner :
-    
+
     - 🤖 Automatically evaluates weather
     - ⚠️ Rejects unsuitable conditions
     - 🌍 Suggests better alternatives
     - ✅ Makes smart travel decisions
     """)
-    
+
     st.markdown("---")
     st.caption("Send your feedback on nitishbhardwaj471@gmail.com")
