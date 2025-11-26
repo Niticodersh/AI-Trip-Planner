@@ -45,7 +45,7 @@ def initialize_tools(google_key, weather_key, serper_key, langchain_key):
         weather_tool = OpenWeatherMapAPIWrapper()
         
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash-exp",
+            model="gemini-2.5-flash",
             temperature=0.3,
             google_api_key=google_key
         )
