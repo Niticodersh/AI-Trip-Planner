@@ -243,7 +243,7 @@ def generate_trip_plan(flights_df, hotels_df, attractions_df, num_days, city, go
     Continue this format for all {num_days} days.
 """
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash-exp",
+        model="gemini-2.5-flash",
         google_api_key=google_key
     )
     message = HumanMessage(content=prompt)
